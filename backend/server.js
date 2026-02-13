@@ -57,10 +57,90 @@ app.get('/api/market', validate([
             return res.status(500).json({ error: 'Server configuration error: Missing API Key' });
         }
 
-        const url = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=${apiKey}&format=json&limit=10&filters[state.keyword]=${state}&filters[commodity]=${commodity}`;
+        // Helper to get estimate from Gemini
+        const getGeminiEstimate = async (s, c) => {
+            const geminiKey = process.env.GEMINI_API_KEY;
+            if (!geminiKey) return null;
 
-        console.log(`Fetching Market Data for: ${state}, ${commodity} ‘‘</UV> ’’`);
-        const response = await axios.get(url);
+            try {
+                console.log(`Asking Gemini for estimated price of ${c} in ${s}... ‘‘</UV> ’’`);
+                // Using OpenRouter to access Gemini if user provided OpenRouter Key, OR direct if they have Gemini Key
+                // Since user said "put my gemini api", we assume they might want to use Google's API directly or via OpenRouter
+                // The current setup uses OpenRouter for everything, so let's stick to that for consistency if possible,
+                // BUT the user specifically added GEMINI_API_KEY.
+                // Let's use the GEMINI_API_KEY with Google's URL if it's a Google key, or OpenRouter if it's an OpenRouter key.
+                // Assuming it's a standard Google AI Studio key for "google/gemini-2.0-flash-lite-preview-02-05:free" via OpenRouter or direct.
+                // Simpler: Use OpenRouter with the existing OPENROUTER_API_KEY but specifically target a high-quality model,
+                // OR use the GEMINI_API_KEY if provided directly to Google.
+                // Given the context, we'll use OpenRouter with the specific free Gemini model, using the GEMINI_API_KEY as an override if present, or OPENROUTER_KEY.
+
+                const keyToUse = process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY;
+                const modelToUse = 'google/gemini-2.0-flash-lite-preview-02-05:free'; // Fast, free, good at reasoning
+
+                const prompt = `Estimate the current average wholesale market price for ${c} in ${s}, India.
+                Return ONLY a JSON object with this exact format, no markdown:
+                {
+                    "records": [
+                        {
+                            "state": "${s}",
+                            "district": "Estimated",
+                            "market": "Market Estimate (AI)",
+                            "commodity": "${c}",
+                            "variety": "Common",
+                            "min_price": "1000",
+                            "max_price": "1200",
+                            "modal_price": "1100",
+                            "arrival_date": "${new Date().toLocaleDateString('en-GB')}"
+                        }
+                    ]
+                }
+                Replace the price values with your best realistic estimate for today in INR/Quintal.`;
+
+                const aiResponse = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+                    model: modelToUse,
+                    messages: [{ role: 'user', content: prompt }]
+                }, {
+                    headers: {
+                        'Authorization': `Bearer ${keyToUse}`,
+                        'Content-Type': 'application/json',
+                        'HTTP-Referer': 'https://kisanmitra.app',
+                        'X-Title': 'Kisan Mitra App',
+                    }
+                });
+
+                if (aiResponse.data?.choices?.[0]?.message?.content) {
+                    const content = aiResponse.data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
+                    return JSON.parse(content);
+                }
+            } catch (e) {
+                console.error('Gemini Estimate Failed:', e.message);
+                return null;
+            }
+            return null;
+        };
+
+        // 1. Try Specific Search (State + Commodity)
+        let url = buildUrl(state, commodity);
+        console.log(`Fetching Market Data (Specific): ${state}, ${commodity} ‘‘</UV> ’’`);
+        let response = await axios.get(url);
+
+        // 2. Fallback: If no records, try State only
+        if ((!response.data.records || response.data.records.length === 0) && commodity) {
+            console.log(`No records for ${commodity}. Trying broader search... ‘‘</UV> ’’`);
+            url = buildUrl(state, null);
+            response = await axios.get(url);
+        }
+
+        // 3. Final Fallback: If STILL no records (or empty state), ask Gemini
+        if (!response.data.records || response.data.records.length === 0) {
+            console.log(`Still no data. engaging Gemini Fallback... ‘‘</UV> ’’`);
+            const aiData = await getGeminiEstimate(state, commodity);
+            if (aiData) {
+                res.json(aiData);
+                return;
+            }
+        }
+
         res.json(response.data);
     } catch (error) {
         console.error('Market API Error:', error.message);

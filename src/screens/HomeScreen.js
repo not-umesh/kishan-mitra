@@ -26,12 +26,19 @@ export default function HomeScreen({ navigation }) {
         setLoading(true);
         setError(null);
         try {
-            // 1. Get Location
-            const coords = await getCurrentLocation();
-            const address = await reverseGeocode(coords.latitude, coords.longitude);
+            // 1. Get Location (with fallback to Raipur, Chhattisgarh)
+            let coords, address;
+            try {
+                coords = await getCurrentLocation();
+                address = await reverseGeocode(coords.latitude, coords.longitude);
+            } catch (locError) {
+                console.log('Using default location (Raipur)');
+                coords = { latitude: 21.2514, longitude: 81.6296 };
+                address = { region: 'Chhattisgarh', city: 'Raipur' };
+            }
 
-            const city = address?.city || address?.district || 'Unknown Location';
-            const state = address?.region || 'Maharashtra';
+            const city = address?.city || address?.district || 'Raipur';
+            const state = (address?.region || 'Chhattisgarh').trim();
             setLocationName(`${city}, ${state}`);
 
             // 2. Get Settings

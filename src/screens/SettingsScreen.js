@@ -4,8 +4,8 @@ import { COLORS, SPACING, FONTS } from '../constants/theme';
 import { saveSettings, getSettings } from '../utils/storage';
 
 export default function SettingsScreen() {
-    const [state, setState] = useState('Maharashtra');
-    const [district, setDistrict] = useState('Nashik');
+    const [state, setState] = useState('Chhattisgarh');
+    const [district, setDistrict] = useState('Raipur');
     const [language, setLanguage] = useState('English');
     const [isHindi, setIsHindi] = useState(false);
 
@@ -16,8 +16,8 @@ export default function SettingsScreen() {
     const loadSettings = async () => {
         const settings = await getSettings();
         if (settings) {
-            setState(settings.state || 'Maharashtra');
-            setDistrict(settings.district || 'Nashik');
+            setState(settings.state || 'Chhattisgarh');
+            setDistrict(settings.district || 'Raipur');
             setLanguage(settings.language || 'English');
             setIsHindi(settings.language === 'Hindi');
         }

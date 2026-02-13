@@ -67,14 +67,17 @@ export default function MandiScreen() {
                 <View style={styles.priceBlock}>
                     <Text style={styles.priceLabel}>Min</Text>
                     <Text style={styles.priceValue}>₹{item.min_price}</Text>
+                    <Text style={styles.unitLabel}>/Qtl</Text>
                 </View>
                 <View style={styles.priceBlockAndBorder}>
                     <Text style={styles.priceLabel}>Modal</Text>
                     <Text style={styles.modalPrice}>₹{item.modal_price}</Text>
+                    <Text style={styles.unitLabelPrimary}>/Qtl</Text>
                 </View>
                 <View style={styles.priceBlock}>
                     <Text style={styles.priceLabel}>Max</Text>
                     <Text style={styles.priceValue}>₹{item.max_price}</Text>
+                    <Text style={styles.unitLabel}>/Qtl</Text>
                 </View>
             </View>
         </View>
@@ -107,6 +110,10 @@ export default function MandiScreen() {
                     ListEmptyComponent={<Text style={styles.emptyText}>No data available for this crop.</Text>}
                 />
             )}
+
+            <View style={styles.footer}>
+                <Text style={styles.footerText}>* Prices are in ₹ per Quintal (1 Qtl = 100 Kg)</Text>
+            </View>
         </View>
     );
 }
@@ -211,6 +218,23 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: 'bold',
         color: COLORS.primary,
+    },
+    unitLabel: {
+        fontSize: 10,
+        color: COLORS.textLight,
+    },
+    unitLabelPrimary: {
+        fontSize: 10,
+        color: COLORS.primary,
+    },
+    footer: {
+        padding: SPACING.m,
+        alignItems: 'center',
+    },
+    footerText: {
+        color: COLORS.textLight,
+        fontSize: 12,
+        fontStyle: 'italic',
     },
     emptyText: {
         textAlign: 'center',

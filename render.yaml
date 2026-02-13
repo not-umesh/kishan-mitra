@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: kisan-mitra-backend
+    env: node
+    region: singapore
+    plan: free
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATA_GOV_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false

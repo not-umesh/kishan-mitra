@@ -82,25 +82,67 @@ app.post('/api/advisory', validate([
         }
 
         console.log('Generating AI Advisory... ‘‘</UV> ’’');
-        const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-            model: 'google/gemini-2.0-flash-exp:free',
-            messages: [{ role: 'user', content: prompt }]
-        }, {
-            headers: {
-                'Authorization': `Bearer ${apiKey}`,
-                'Content-Type': 'application/json',
-                'HTTP-Referer': 'https://kisanmitra.app',
-                'X-Title': 'Kisan Mitra App',
-            }
-        });
 
-        res.json(response.data);
+        // List of models to try in order (Fallback strategy)
+        // Updated with latest free models as of Feb 2026
+        // List of models to try in order (Fallback strategy)
+        // Updated with user-requested free models (Feb 2026)
+        const models = [
+            'nousresearch/hermes-3-llama-3.1-405b:free',
+            'google/gemma-3-27b-it:free',
+            'google/gemma-3-12b-it:free',
+            'qwen/qwen3-4b-instruct:free',
+            'google/gemma-3-4b-it:free',
+            'meta-llama/llama-3.2-3b-instruct:free',
+            'google/gemma-3n-4b-it:free',
+            'google/gemma-3n-2b-it:free',
+        ];
+
+        let lastError;
+        for (const model of models) {
+            try {
+                console.log(`Trying model: ${model}`);
+                const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+                    model: model,
+                    messages: [{ role: 'user', content: prompt }]
+                }, {
+                    headers: {
+                        'Authorization': `Bearer ${apiKey}`,
+                        'Content-Type': 'application/json',
+                        'HTTP-Referer': 'https://kisanmitra.app',
+                        'X-Title': 'Kisan Mitra App',
+                    },
+                    timeout: 15000 // 15 second timeout for slower models
+                });
+
+                if (response.data && response.data.choices && response.data.choices.length > 0) {
+                    console.log(`Success with model: ${model}`);
+                    return res.json(response.data);
+                }
+            } catch (error) {
+                console.error(`Model ${model} failed: ${error.message}`);
+                // Log full error for debugging
+                if (error.response) {
+                    console.error('Status:', error.response.status, 'Data:', JSON.stringify(error.response.data));
+                }
+
+                lastError = error;
+                // Continue to next model on ANY error (5xx server, 429 rate limit, 404 model not found)
+                // Only stop if it's a 401 (Unauthorized - Invalid API Key) which applies to all models
+                if (error.response && error.response.status === 401) {
+                    break;
+                }
+            }
+        }
+
+        throw lastError || new Error('All models failed');
+
     } catch (error) {
-        console.error('Advisory API Error:', error.message);
+        console.error('Advisory API Fatal Error:', error.message);
         if (error.response) {
             console.error('OpenRouter Response:', error.response.data);
         }
-        res.status(500).json({ error: 'Failed to generate advisory' });
+        res.status(500).json({ error: 'Failed to generate advisory. Please try again later.' });
     }
 });
 

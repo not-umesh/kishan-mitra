@@ -122,18 +122,30 @@ app.get('/api/market', validate([
         // 1. Try Specific Search (State + Commodity)
         let url = buildUrl(state, commodity);
         console.log(`Fetching Market Data (Specific): ${state}, ${commodity} ‘‘</UV> ’’`);
-        let response = await axios.get(url);
+
+        let response = { data: { records: [] } }; // Default empty
+        try {
+            response = await axios.get(url);
+        } catch (apiError) {
+            console.warn(`Primary API Failed (Specific): ${apiError.message}`);
+            // Do not throw, let it fall through to fallbacks
+        }
 
         // 2. Fallback: If no records, try State only
         if ((!response.data.records || response.data.records.length === 0) && commodity) {
             console.log(`No records for ${commodity}. Trying broader search... ‘‘</UV> ’’`);
             url = buildUrl(state, null);
-            response = await axios.get(url);
+            try {
+                response = await axios.get(url);
+            } catch (apiError) {
+                console.warn(`Secondary API Failed (Broad): ${apiError.message}`);
+                // Do not throw, let it fall through to AI fallback
+            }
         }
 
         // 3. Final Fallback: If STILL no records (or empty state), ask Gemini
-        if (!response.data.records || response.data.records.length === 0) {
-            console.log(`Still no data. engaging Gemini Fallback... ‘‘</UV> ’’`);
+        if (!response.data || !response.data.records || response.data.records.length === 0) {
+            console.log(`Still no data. Engaging Gemini Fallback... ‘‘</UV> ’’`);
             const aiData = await getGeminiEstimate(state, commodity);
             if (aiData) {
                 res.json(aiData);
@@ -141,7 +153,7 @@ app.get('/api/market', validate([
             }
         }
 
-        res.json(response.data);
+        res.json(response.data || { records: [] });
     } catch (error) {
         console.error('Market API Error:', error.message);
         res.status(500).json({ error: 'Failed to fetch market data' });

@@ -38,6 +38,15 @@ const validate = (validations) => {
     };
 };
 
+// Helper to build API URL
+const buildUrl = (state, commodity) => {
+    const apiKey = process.env.DATA_GOV_API_KEY;
+    let baseUrl = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=${apiKey}&format=json&limit=20`;
+    if (state) baseUrl += `&filters[state]=${encodeURIComponent(state)}`;
+    if (commodity) baseUrl += `&filters[commodity]=${encodeURIComponent(commodity)}`;
+    return baseUrl;
+};
+
 // Routes
 app.get('/', (req, res) => {
     res.send('🌾 Kisan-Mitra Backend is Running! ‘‘</UV> ’’');

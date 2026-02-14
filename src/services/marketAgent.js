@@ -67,9 +67,25 @@ export const getMarketPrices = async (state, commodity) => {
 };
 
 const getMockMarketData = (state, commodity) => {
-    // Return realistic mock data for demo purposes
-    // Dynamic price generation to make it look real
-    const basePrice = Math.floor(Math.random() * 2000) + 1000;
+    // Generate a deterministic price based on Date + Commodity + State
+    // This ensures prices don't change on refresh for the same day
+    const today = new Date();
+    const dateStr = today.toLocaleDateString('en-IN');
+    const seedString = `${dateStr}-${state}-${commodity}`;
+
+    // Simple hash function to get a number from string
+    let hash = 0;
+    for (let i = 0; i < seedString.length; i++) {
+        hash = ((hash << 5) - hash) + seedString.charCodeAt(i);
+        hash |= 0; // Convert to 32bit integer
+    }
+
+    // Normalize hash to a positive number
+    const positiveHash = Math.abs(hash);
+
+    // Generate base price between 1000 and 3000
+    // Use the hash to pick a stable number in this range
+    const basePrice = (positiveHash % 2000) + 1000;
 
     return [
         {
@@ -81,7 +97,7 @@ const getMockMarketData = (state, commodity) => {
             min_price: (basePrice - 200).toString(),
             max_price: (basePrice + 200).toString(),
             modal_price: basePrice.toString(),
-            date: new Date().toLocaleDateString('en-IN'),
+            date: dateStr,
         },
         {
             state: state || 'Chhattisgarh',
@@ -92,7 +108,7 @@ const getMockMarketData = (state, commodity) => {
             min_price: (basePrice - 100).toString(),
             max_price: (basePrice + 300).toString(),
             modal_price: (basePrice + 100).toString(),
-            date: new Date().toLocaleDateString('en-IN'),
+            date: dateStr,
         }
     ];
 };

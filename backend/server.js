@@ -59,11 +59,16 @@ app.get('/api/market', validate([
 
         // Helper to get estimate from Gemini
         const getGeminiEstimate = async (s, c) => {
-            const geminiKey = process.env.GEMINI_API_KEY;
-            if (!geminiKey) return null;
+            // Fix: Use EITHER key. Prefer Gemini Key if available, else OpenRouter.
+            const keyToUse = process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY;
+
+            if (!keyToUse) {
+                console.log('Skipping AI Fallback: No API Keys available.');
+                return null;
+            }
 
             try {
-                console.log(`Asking Gemini for estimated price of ${c} in ${s}... ‘‘</UV> ’’`);
+                console.log(`Asking Gemini (via ${process.env.GEMINI_API_KEY ? 'Google' : 'OpenRouter'}) for estimated price of ${c} in ${s}... ‘‘</UV> ’’`);
                 // Using OpenRouter to access Gemini if user provided OpenRouter Key, OR direct if they have Gemini Key
                 // Since user said "put my gemini api", we assume they might want to use Google's API directly or via OpenRouter
                 // The current setup uses OpenRouter for everything, so let's stick to that for consistency if possible,
@@ -73,8 +78,6 @@ app.get('/api/market', validate([
                 // Simpler: Use OpenRouter with the existing OPENROUTER_API_KEY but specifically target a high-quality model,
                 // OR use the GEMINI_API_KEY if provided directly to Google.
                 // Given the context, we'll use OpenRouter with the specific free Gemini model, using the GEMINI_API_KEY as an override if present, or OPENROUTER_KEY.
-
-                const keyToUse = process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY;
                 const modelToUse = 'google/gemini-2.0-flash-lite-preview-02-05:free'; // Fast, free, good at reasoning
 
                 const prompt = `Estimate the current average wholesale market price for ${c} in ${s}, India.

@@ -68,21 +68,18 @@ app.get('/api/market', validate([
 
         // Helper to get estimate from Gemini
         const getGeminiEstimate = async (s, c) => {
-            // Fix: Use EITHER key. Prefer Gemini Key if available, else OpenRouter.
-            const keyToUse = process.env.GEMINI_API_KEY || process.env.OPENROUTER_API_KEY;
+            // Fix: Use OPENROUTER_API_KEY since we are hitting the OpenRouter endpoint.
+            // (Google Keys don't work on OpenRouter URL).
+            const keyToUse = process.env.OPENROUTER_API_KEY;
 
             if (!keyToUse) {
-                console.log('Skipping AI Fallback: No API Keys available.');
+                console.log('Skipping AI Fallback: No OpenRouter API Key.');
                 return null;
             }
 
             try {
-                console.log(`Asking Gemini (via ${process.env.GEMINI_API_KEY ? 'Google' : 'OpenRouter'}) for estimated price of ${c} in ${s}... ‘‘</UV> ’’`);
-                // Using OpenRouter to access Gemini if user provided OpenRouter Key, OR direct if they have Gemini Key
-                // Since user said "put my gemini api", we assume they might want to use Google's API directly or via OpenRouter
-                // The current setup uses OpenRouter for everything, so let's stick to that for consistency if possible,
-                // BUT the user specifically added GEMINI_API_KEY.
-                // Let's use the GEMINI_API_KEY with Google's URL if it's a Google key, or OpenRouter if it's an OpenRouter key.
+                console.log(`Asking Gemini (via OpenRouter) for estimated price of ${c} in ${s}... ‘‘</UV> ’’`);
+                // Use a reliable free model on OpenRouter
                 // Assuming it's a standard Google AI Studio key for "google/gemini-2.0-flash-lite-preview-02-05:free" via OpenRouter or direct.
                 // Simpler: Use OpenRouter with the existing OPENROUTER_API_KEY but specifically target a high-quality model,
                 // OR use the GEMINI_API_KEY if provided directly to Google.

@@ -10,7 +10,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Security Middleware
-app.use(helmet()); // Secure HTTP headers
+app.use(helmet());
 app.use(cors());
 app.use(express.json());
 
@@ -28,149 +28,175 @@ app.use(limiter);
 const validate = (validations) => {
     return async (req, res, next) => {
         await Promise.all(validations.map(validation => validation.run(req)));
-
         const errors = validationResult(req);
-        if (errors.isEmpty()) {
-            return next();
-        }
-
+        if (errors.isEmpty()) return next();
         res.status(400).json({ errors: errors.array() });
     };
 };
 
-// Helper to build API URL
-const buildUrl = (state, commodity) => {
-    const apiKey = process.env.DATA_GOV_API_KEY;
-    let baseUrl = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=${apiKey}&format=json&limit=20`;
-    if (state) baseUrl += `&filters[state]=${encodeURIComponent(state)}`;
-    if (commodity) baseUrl += `&filters[commodity]=${encodeURIComponent(commodity)}`;
-    return baseUrl;
+// ── AI Model Config (shared across endpoints) ──
+const AI_MODELS = [
+    'google/gemma-3-12b-it:free',
+    'google/gemma-3-27b-it:free',
+    'qwen/qwen3-4b-instruct:free',
+    'google/gemma-3-4b-it:free',
+    'meta-llama/llama-3.2-3b-instruct:free',
+    'google/gemma-3n-4b-it:free',
+    'google/gemma-3n-2b-it:free',
+];
+
+// ── Helper: Get AI-estimated market prices via OpenRouter ──
+const getAIMarketEstimate = async (state, commodity) => {
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+        console.warn('No OPENROUTER_API_KEY set. Cannot generate AI prices.');
+        return null;
+    }
+
+    const today = new Date().toLocaleDateString('en-GB');
+    const prompt = `You are an Indian agricultural market data expert.
+Estimate realistic current wholesale market prices for "${commodity}" in "${state}", India.
+Return ONLY a valid JSON object (no markdown, no explanation), in this exact format:
+{
+    "records": [
+        {
+            "state": "${state}",
+            "district": "Major District",
+            "market": "Main Mandi",
+            "commodity": "${commodity}",
+            "variety": "Common",
+            "min_price": "1500",
+            "max_price": "2200",
+            "modal_price": "1800",
+            "arrival_date": "${today}"
+        },
+        {
+            "state": "${state}",
+            "district": "Second District",
+            "market": "Second Mandi",
+            "commodity": "${commodity}",
+            "variety": "Hybrid",
+            "min_price": "1600",
+            "max_price": "2400",
+            "modal_price": "2000",
+            "arrival_date": "${today}"
+        }
+    ]
+}
+Replace ALL price values with your best realistic estimate in INR per Quintal.
+Use real district and market names from ${state}.`;
+
+    // Try each model until one works
+    for (const model of AI_MODELS) {
+        try {
+            console.log(`[Market AI] Trying ${model} for ${commodity} in ${state}...`);
+            const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
+                model,
+                messages: [{ role: 'user', content: prompt }]
+            }, {
+                headers: {
+                    'Authorization': `Bearer ${apiKey}`,
+                    'Content-Type': 'application/json',
+                    'HTTP-Referer': 'https://kisanmitra.app',
+                    'X-Title': 'Kisan Mitra App',
+                },
+                timeout: 15000
+            });
+
+            const content = response.data?.choices?.[0]?.message?.content;
+            if (content) {
+                const cleaned = content.replace(/```json/g, '').replace(/```/g, '').trim();
+                const parsed = JSON.parse(cleaned);
+                if (parsed.records && parsed.records.length > 0) {
+                    console.log(`[Market AI] Success with ${model}`);
+                    return parsed;
+                }
+            }
+        } catch (e) {
+            console.warn(`[Market AI] ${model} failed: ${e.message}`);
+            if (e.response?.status === 401) break; // Bad key, stop trying
+        }
+    }
+    return null;
 };
 
-// Routes
+// ── Helper: Build data.gov.in URL ──
+const buildGovUrl = (state, commodity) => {
+    const apiKey = process.env.DATA_GOV_API_KEY;
+    if (!apiKey) return null;
+    let url = `https://api.data.gov.in/resource/9ef84268-d588-465a-a308-a864a43d0070?api-key=${apiKey}&format=json&limit=20`;
+    if (state) url += `&filters[state]=${encodeURIComponent(state)}`;
+    if (commodity) url += `&filters[commodity]=${encodeURIComponent(commodity)}`;
+    return url;
+};
+
+// ── Routes ──
 app.get('/', (req, res) => {
-    res.send('🌾 Kisan-Mitra Backend is Running! ‘‘</UV> ’’');
+    res.json({ status: 'ok', message: '🌾 Kisan-Mitra Backend is Running!' });
 });
 
-// Proxy for Market Prices (data.gov.in)
-// Validates: state (string, not empty), commodity (string, optional)
+// ── Market Prices Endpoint ──
+// Strategy: Try data.gov.in first → AI fallback if it fails
 app.get('/api/market', validate([
     query('state').trim().notEmpty().withMessage('State is required').escape(),
     query('commodity').optional().trim().escape()
 ]), async (req, res) => {
     try {
         const { state, commodity } = req.query;
-        const apiKey = process.env.DATA_GOV_API_KEY;
 
-        if (!apiKey) {
-            return res.status(500).json({ error: 'Server configuration error: Missing API Key' });
-        }
-
-        // Helper to get estimate from Gemini
-        const getGeminiEstimate = async (s, c) => {
-            // Fix: Use OPENROUTER_API_KEY since we are hitting the OpenRouter endpoint.
-            // (Google Keys don't work on OpenRouter URL).
-            const keyToUse = process.env.OPENROUTER_API_KEY;
-
-            if (!keyToUse) {
-                console.log('Skipping AI Fallback: No OpenRouter API Key.');
-                return null;
+        // 1. Try official data.gov.in API (if key exists)
+        const govUrl = buildGovUrl(state, commodity);
+        if (govUrl) {
+            try {
+                console.log(`[Market] Trying data.gov.in for ${commodity} in ${state}`);
+                const govResponse = await axios.get(govUrl, { timeout: 8000 });
+                if (govResponse.data?.records?.length > 0) {
+                    console.log(`[Market] Got ${govResponse.data.records.length} records from data.gov.in`);
+                    return res.json(govResponse.data);
+                }
+                console.log('[Market] data.gov.in returned empty records');
+            } catch (govError) {
+                console.warn(`[Market] data.gov.in failed: ${govError.message}`);
             }
 
-            try {
-                console.log(`Asking Gemini (via OpenRouter) for estimated price of ${c} in ${s}... ‘‘</UV> ’’`);
-                // Use a reliable free model on OpenRouter
-                // Assuming it's a standard Google AI Studio key for "google/gemini-2.0-flash-lite-preview-02-05:free" via OpenRouter or direct.
-                // Simpler: Use OpenRouter with the existing OPENROUTER_API_KEY but specifically target a high-quality model,
-                // OR use the GEMINI_API_KEY if provided directly to Google.
-                // Given the context, we'll use OpenRouter with the specific free Gemini model, using the GEMINI_API_KEY as an override if present, or OPENROUTER_KEY.
-                const modelToUse = 'google/gemini-2.0-flash-lite-preview-02-05:free'; // Fast, free, good at reasoning
-
-                const prompt = `Estimate the current average wholesale market price for ${c} in ${s}, India.
-                Return ONLY a JSON object with this exact format, no markdown:
-                {
-                    "records": [
-                        {
-                            "state": "${s}",
-                            "district": "Estimated",
-                            "market": "Market Estimate (AI)",
-                            "commodity": "${c}",
-                            "variety": "Common",
-                            "min_price": "1000",
-                            "max_price": "1200",
-                            "modal_price": "1100",
-                            "arrival_date": "${new Date().toLocaleDateString('en-GB')}"
+            // 1b. Try broader search (state only, no commodity filter)
+            if (commodity) {
+                const broadUrl = buildGovUrl(state, null);
+                if (broadUrl) {
+                    try {
+                        console.log(`[Market] Trying broader search (state only)...`);
+                        const broadResponse = await axios.get(broadUrl, { timeout: 8000 });
+                        if (broadResponse.data?.records?.length > 0) {
+                            console.log(`[Market] Got ${broadResponse.data.records.length} records (broad)`);
+                            return res.json(broadResponse.data);
                         }
-                    ]
-                }
-                Replace the price values with your best realistic estimate for today in INR/Quintal.`;
-
-                const aiResponse = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-                    model: modelToUse,
-                    messages: [{ role: 'user', content: prompt }]
-                }, {
-                    headers: {
-                        'Authorization': `Bearer ${keyToUse}`,
-                        'Content-Type': 'application/json',
-                        'HTTP-Referer': 'https://kisanmitra.app',
-                        'X-Title': 'Kisan Mitra App',
+                    } catch (broadError) {
+                        console.warn(`[Market] Broad search failed: ${broadError.message}`);
                     }
-                });
-
-                if (aiResponse.data?.choices?.[0]?.message?.content) {
-                    const content = aiResponse.data.choices[0].message.content.replace(/```json/g, '').replace(/```/g, '').trim();
-                    return JSON.parse(content);
                 }
-            } catch (e) {
-                console.error('Gemini Estimate Failed:', e.message);
-                return null;
             }
-            return null;
-        };
-
-        // 1. Try Specific Search (State + Commodity)
-        let url = buildUrl(state, commodity);
-        console.log(`Fetching Market Data (Specific): ${state}, ${commodity} ‘‘</UV> ’’`);
-
-        let response = { data: { records: [] } }; // Default empty
-        try {
-            response = await axios.get(url);
-        } catch (apiError) {
-            console.warn(`Primary API Failed (Specific): ${apiError.message}`);
-            // Do not throw, let it fall through to fallbacks
+        } else {
+            console.log('[Market] No DATA_GOV_API_KEY, skipping official API');
         }
 
-        // 2. Fallback: If no records, try State only
-        if ((!response.data.records || response.data.records.length === 0) && commodity) {
-            console.log(`No records for ${commodity}. Trying broader search... ‘‘</UV> ’’`);
-            url = buildUrl(state, null);
-            try {
-                response = await axios.get(url);
-            } catch (apiError) {
-                console.warn(`Secondary API Failed (Broad): ${apiError.message}`);
-                // Do not throw, let it fall through to AI fallback
-            }
+        // 2. AI Fallback (always available if OPENROUTER_API_KEY is set)
+        console.log(`[Market] Engaging AI fallback for ${commodity} in ${state}...`);
+        const aiData = await getAIMarketEstimate(state, commodity || 'Onion');
+        if (aiData) {
+            return res.json(aiData);
         }
 
-        // 3. Final Fallback: If STILL no records (or empty state), ask Gemini
-        if (!response.data || !response.data.records || response.data.records.length === 0) {
-            console.log(`Still no data. Engaging Gemini Fallback... ‘‘</UV> ’’`);
-            const aiData = await getGeminiEstimate(state, commodity);
-            if (aiData) {
-                res.json(aiData);
-                return;
-            }
-        }
+        // 3. Nothing worked — return empty
+        console.warn('[Market] All sources failed. Returning empty.');
+        res.json({ records: [] });
 
-        res.json(response.data || { records: [] });
     } catch (error) {
-        console.error('Market API Error:', error.message);
+        console.error('[Market] Fatal error:', error.message);
         res.status(500).json({ error: 'Failed to fetch market data' });
     }
 });
 
-// Proxy for AI Advisory (OpenRouter)
-// Validates: prompt (string, not empty, max length 1000 chars)
+// ── AI Advisory Endpoint ──
 app.post('/api/advisory', validate([
     body('prompt').trim().notEmpty().withMessage('Prompt is required').isLength({ max: 1000 }).withMessage('Prompt too long').escape()
 ]), async (req, res) => {
@@ -182,29 +208,14 @@ app.post('/api/advisory', validate([
             return res.status(500).json({ error: 'Server configuration error: Missing API Key' });
         }
 
-        console.log('Generating AI Advisory... ‘‘</UV> ’’');
-
-        // List of models to try in order (Fallback strategy)
-        // Updated with latest free models as of Feb 2026
-        // List of models to try in order (Fallback strategy)
-        // Updated with user-requested free models (Feb 2026)
-        const models = [
-            'nousresearch/hermes-3-llama-3.1-405b:free',
-            'google/gemma-3-27b-it:free',
-            'google/gemma-3-12b-it:free',
-            'qwen/qwen3-4b-instruct:free',
-            'google/gemma-3-4b-it:free',
-            'meta-llama/llama-3.2-3b-instruct:free',
-            'google/gemma-3n-4b-it:free',
-            'google/gemma-3n-2b-it:free',
-        ];
+        console.log('[Advisory] Generating...');
 
         let lastError;
-        for (const model of models) {
+        for (const model of AI_MODELS) {
             try {
-                console.log(`Trying model: ${model}`);
+                console.log(`[Advisory] Trying ${model}`);
                 const response = await axios.post('https://openrouter.ai/api/v1/chat/completions', {
-                    model: model,
+                    model,
                     messages: [{ role: 'user', content: prompt }]
                 }, {
                     headers: {
@@ -213,41 +224,29 @@ app.post('/api/advisory', validate([
                         'HTTP-Referer': 'https://kisanmitra.app',
                         'X-Title': 'Kisan Mitra App',
                     },
-                    timeout: 15000 // 15 second timeout for slower models
+                    timeout: 15000
                 });
 
-                if (response.data && response.data.choices && response.data.choices.length > 0) {
-                    console.log(`Success with model: ${model}`);
+                if (response.data?.choices?.length > 0) {
+                    console.log(`[Advisory] Success with ${model}`);
                     return res.json(response.data);
                 }
             } catch (error) {
-                console.error(`Model ${model} failed: ${error.message}`);
-                // Log full error for debugging
-                if (error.response) {
-                    console.error('Status:', error.response.status, 'Data:', JSON.stringify(error.response.data));
-                }
-
+                console.error(`[Advisory] ${model} failed: ${error.message}`);
                 lastError = error;
-                // Continue to next model on ANY error (5xx server, 429 rate limit, 404 model not found)
-                // Only stop if it's a 401 (Unauthorized - Invalid API Key) which applies to all models
-                if (error.response && error.response.status === 401) {
-                    break;
-                }
+                if (error.response?.status === 401) break;
             }
         }
 
         throw lastError || new Error('All models failed');
 
     } catch (error) {
-        console.error('Advisory API Fatal Error:', error.message);
-        if (error.response) {
-            console.error('OpenRouter Response:', error.response.data);
-        }
+        console.error('[Advisory] Fatal error:', error.message);
         res.status(500).json({ error: 'Failed to generate advisory. Please try again later.' });
     }
 });
 
 // Start Server
 app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT} ‘‘</UV> ’’`);
+    console.log(`🌾 Kisan-Mitra server running on port ${PORT}`);
 });

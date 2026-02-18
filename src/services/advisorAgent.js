@@ -1,4 +1,6 @@
-import { BACKEND_URL } from '@env';
+import Constants from 'expo-constants';
+
+const { BACKEND_URL } = Constants.expoConfig?.extra || {};
 
 // Use local backend for development
 const API_URL = BACKEND_URL ? `${BACKEND_URL}/api/advisory` : 'http://localhost:3000/api/advisory';

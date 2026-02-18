@@ -61,7 +61,7 @@ export default function MandiScreen() {
         <View style={styles.priceCard}>
             <View style={styles.priceHeader}>
                 <Text style={styles.marketName}>{item.market}, {item.district}</Text>
-                <Text style={styles.date}>{new Date(item.date).toLocaleDateString()}</Text>
+                <Text style={styles.date}>{item.date || 'Today'}</Text>
             </View>
             <View style={styles.priceRow}>
                 <View style={styles.priceBlock}>

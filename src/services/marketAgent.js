@@ -1,4 +1,6 @@
-import { DATA_GOV_API_KEY, BACKEND_URL } from '@env';
+import Constants from 'expo-constants';
+
+const { DATA_GOV_API_KEY, BACKEND_URL } = Constants.expoConfig?.extra || {};
 
 // Use local backend for development, fallback to production URL if set
 const API_URL = BACKEND_URL ? `${BACKEND_URL}/api/market` : 'http://localhost:3000/api/market';

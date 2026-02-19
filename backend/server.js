@@ -150,7 +150,7 @@ Rules:
 
 // ── AI Advisory (OpenRouter) ──
 app.post('/api/advisory', validate([
-    body('prompt').trim().notEmpty().withMessage('Prompt is required').isLength({ max: 1000 }).withMessage('Prompt too long').escape()
+    body('prompt').trim().notEmpty().withMessage('Prompt is required').isLength({ max: 5000 }).withMessage('Prompt too long')
 ]), async (req, res) => {
     try {
         const { prompt } = req.body;
